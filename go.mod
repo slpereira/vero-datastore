@@ -1,6 +1,6 @@
 module github.com/slpereira/vero-datastore
 
-go 1.15
+go 1.13
 
 require (
 	cloud.google.com/go/bigquery v1.4.0 // indirect
