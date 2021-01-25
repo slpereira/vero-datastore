@@ -21,6 +21,9 @@ func TestVeroDatastore_AddPath(t *testing.T) {
 		if err != nil {
 			log.Fatal(err.Error())
 		}
+		if err := ds.AddPath("/"); err != nil {
+			t.Fatalf("AddPath() error = %v", err)
+		}
 		if err := ds.AddPath("/teste/teste2/teste3"); err != nil {
 			t.Fatalf("AddPath() error = %v", err)
 		}
@@ -43,7 +46,7 @@ func TestVeroStore_AddFileToVero(t *testing.T) {
 			log.Fatal(err.Error())
 		}
 		ev := model.GCSEvent{
-			Name:           "/Usr1/silvio/test/file3.txt",
+			Name:           "vup2.db",
 			Bucket:         "tatic-vero-in",
 			ContentType:    "text/plain",
 			TimeCreated:    time.Now(),
@@ -58,5 +61,23 @@ func TestVeroStore_AddFileToVero(t *testing.T) {
 		if err := ds.AddFileToVero(context.Background(), ev); err != nil {
 			t.Errorf("AddFileToVero() error = %v", err)
 		}
+
+		ev = model.GCSEvent{
+			Name:           "../../vup3.db",
+			Bucket:         "tatic-vero-in",
+			ContentType:    "text/plain",
+			TimeCreated:    time.Now(),
+			Updated:        time.Now(),
+			TemporaryHold:  false,
+			EventBasedHold: false,
+			StorageClass:   "standard",
+			Size:           "10240",
+			MD5Hash:        "qNVG+7DkxIGwj+MXxQu2+w==",
+			Metadata:       nil,
+		}
+		if err := ds.AddFileToVero(context.Background(), ev); err != nil {
+			t.Errorf("AddFileToVero() error = %v", err)
+		}
+
 	})
 }

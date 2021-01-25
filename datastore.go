@@ -124,7 +124,7 @@ func (s *VeroStore) AddFileToVero(ctx context.Context, event model.GCSEvent) err
 	}
 	_, err = s.client.RunInTransaction(ctx, func(tx *datastore.Transaction) error {
 		// Node
-		nodeID := filepath.Join("/", event.Name)
+		nodeID := filepath.Join("/", filepath.Clean(event.Name))
 		nodeKey := datastore.NameKey("Node", nodeID, nil)
 		var n model.Node
 		var nv model.NodeVersion
@@ -137,10 +137,10 @@ func (s *VeroStore) AddFileToVero(ctx context.Context, event model.GCSEvent) err
 		}
 		// New Node
 		if err == datastore.ErrNoSuchEntity {
-			n.Name = filepath.Base(event.Name)
+			n.Name = filepath.Base(nodeID)
 			n.ID = nodeID
 			n.NodeType = model.DOCUMENT_TYPE
-			n.Path = filepath.Dir(event.Name)
+			n.Path = filepath.Dir(nodeID)
 			n.Store = event.Bucket
 			n.ContentType = event.ContentType
 			n.ContentLength = size
