@@ -18,7 +18,8 @@ require (
 	github.com/google/uuid v1.1.2 // indirect
 	github.com/spf13/viper v1.7.1
 	go.opencensus.io v0.22.5 // indirect
-	go.uber.org/zap v1.16.0 // indirect
+	go.uber.org/multierr v1.6.0 // indirect
+	go.uber.org/zap v1.16.0
 	golang.org/x/exp v0.0.0-20200224162631-6cc2880d07d6 // indirect
 	golang.org/x/lint v0.0.0-20201208152925-83fdc39ff7b5 // indirect
 	golang.org/x/mod v0.4.1 // indirect

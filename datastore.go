@@ -6,7 +6,7 @@ import (
 	b64 "encoding/base64"
 	"fmt"
 	"github.com/slpereira/vero-datastore/model"
-	"log"
+	"go.uber.org/zap"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -17,6 +17,7 @@ import (
 
 // VeroStore implements the access to the datastore, but include some cache for some objects
 type VeroStore struct {
+	log            *zap.Logger
 	client         *datastore.Client
 	etcd           *VeroEtcdClient
 	projectID      string
@@ -24,7 +25,7 @@ type VeroStore struct {
 	pathExpiration time.Duration
 }
 
-func NewVeroStore(projectID, redisAddress, redisPwd string, etcdEndpoints []string) (*VeroStore, error) {
+func NewVeroStore(projectID, redisAddress, redisPwd string, etcdEndpoints []string, log *zap.Logger) (*VeroStore, error) {
 	cl, err := datastore.NewClient(context.Background(), projectID)
 	if err != nil {
 		return nil, err
@@ -35,11 +36,11 @@ func NewVeroStore(projectID, redisAddress, redisPwd string, etcdEndpoints []stri
 	pathExpiration, err := time.ParseDuration(pathExpStr)
 
 	if err != nil {
-		log.Printf("invalid path cache ttl param:%v\n", err)
+		log.Warn("invalid path cache ttl param", zap.Error(err))
 		pathExpiration = 0
 	}
 
-	etcd, err := NewVeroEtcdClient(etcdEndpoints)
+	etcd, err := NewVeroEtcdClient(etcdEndpoints, log)
 	if err != nil {
 		return nil, err
 	}
@@ -49,11 +50,12 @@ func NewVeroStore(projectID, redisAddress, redisPwd string, etcdEndpoints []stri
 		cache:          NewCache(redisAddress, redisPwd),
 		pathExpiration: pathExpiration,
 		etcd:           etcd,
+		log:            log,
 	}, nil
 }
 
 func (s *VeroStore) GetNode(ID string) (*model.Node, error) {
-	log.Printf("datastore:node:get %s\n", ID)
+	s.log.Debug("datastore:node:get", zap.String("id", ID))
 	key := datastore.NameKey("Node", ID, nil)
 	var n model.Node
 	err := s.client.Get(context.Background(), key, &n)
@@ -69,7 +71,7 @@ func (s *VeroStore) GetNode(ID string) (*model.Node, error) {
 }
 
 func (s *VeroStore) GetNodeVersion(ID string) (*model.NodeVersion, error) {
-	log.Printf("datastore:node-version:get %s\n", ID)
+	s.log.Debug("datastore:node-version:get", zap.String("id", ID))
 	key := datastore.NameKey("NodeVersion", ID, nil)
 	var n model.NodeVersion
 	err := s.client.Get(context.Background(), key, &n)
@@ -89,7 +91,7 @@ func (s *VeroStore) GetNodeVersion(ID string) (*model.NodeVersion, error) {
 }
 
 func (s *VeroStore) PutNode(n *model.Node) error {
-	log.Printf("datastore:node:put %s\n", n.ID)
+	s.log.Debug("datastore:node:put", zap.String("id", n.ID))
 	key := datastore.NameKey("Node", n.ID, nil)
 	_, err := s.client.Put(context.Background(), key, &n)
 	if err != nil {
@@ -99,18 +101,20 @@ func (s *VeroStore) PutNode(n *model.Node) error {
 }
 
 func (s *VeroStore) PutNodeVersion(n *model.NodeVersion) error {
-	log.Printf("datastore:node-version:put %s\n", n.ID)
+	s.log.Debug("datastore:node-version:put", zap.String("ID", n.ID))
 	key := datastore.NameKey("NodeVersion", n.ID, nil)
 	_, err := s.client.Put(context.Background(), key, n)
 	return err
 }
 
 func (s *VeroStore) AddFileToVero(ctx context.Context, event model.GCSEvent) error {
-	log.Printf("processing file %s from %s\n", event.Name, event.Bucket)
+	s.log.Info("add file to vero", zap.String("name", event.Name),
+		zap.String("bucket", event.Bucket))
 	mStart := time.Now()
 	// if file is zero size, discard them
 	if event.Size == "0" {
-		log.Printf("file %s from bucket %s is zero size\n", event.Name, event.Bucket)
+		s.log.Warn("zero size file", zap.String("name", event.Name),
+			zap.String("bucket", event.Bucket))
 		// delete from storage
 		return nil
 	}
@@ -128,10 +132,10 @@ func (s *VeroStore) AddFileToVero(ctx context.Context, event model.GCSEvent) err
 		nodeKey := datastore.NameKey("Node", nodeID, nil)
 		var n model.Node
 		var nv model.NodeVersion
-		log.Printf("looking for node: %s\n", nodeKey.Name)
+		s.log.Debug("looking for node",zap.String("key", nodeKey.Name))
 		start := time.Now()
 		err := tx.Get(nodeKey, &n)
-		log.Printf("looking for node: %s took %v\n", nodeKey.Name, time.Now().Sub(start))
+		s.log.Info("looked for node", zap.String("key", nodeKey.Name), zap.Duration("time", time.Since(start)))
 		if err != nil && err != datastore.ErrNoSuchEntity {
 			return err
 		}
@@ -152,17 +156,17 @@ func (s *VeroStore) AddFileToVero(ctx context.Context, event model.GCSEvent) err
 			n.Checksum = cs
 			n.Metadata = event.Metadata
 			n.Owner = event.Bucket
-			log.Printf("checking path:%s", n.Path)
+			s.log.Debug("checking path", zap.String("path", n.Path))
 			start = time.Now()
 			// add path only if the file is completely new, otherwise the path already exists
 			if err = s.addPathInternally(n.Path, tx); err != nil {
 				return err
 			}
-			log.Printf("checking path:%s took %s", n.Path, time.Now().Sub(start))
+			s.log.Info("checked path", zap.String("path", n.Path), zap.Duration("time", time.Now().Sub(start)))
 		} else {
 			// same file???
 			if cs == n.Checksum {
-				log.Printf("file %s from bucket %s does not change the content\n", event.Name, event.Bucket)
+				s.log.Warn("same checksum", zap.String("name", event.Name), zap.String("bucket", event.Bucket))
 				return nil
 			}
 			// Node exists, we are updating the file, checking versioning and if the file really changed comparing the Checksum
@@ -193,25 +197,30 @@ func (s *VeroStore) AddFileToVero(ctx context.Context, event model.GCSEvent) err
 		}
 		// add everything
 
-		log.Printf("adding node version: %s and node: %s\n", nv.ID, n.ID)
+		s.log.Debug("adding node version and node", zap.String("node-version", nv.ID),
+			zap.String("node", n.ID))
 		start = time.Now()
 		// add NV
 		_, err = tx.PutMulti([]*datastore.Key{nodeKey, nvKey}, []interface{}{&n, &nv})
-		log.Printf("adding node version: %s and node: %s took %s\n", nv.ID, n.ID, time.Now().Sub(start))
+		s.log.Info("added node version and node",  zap.String("node-version", nv.ID),
+			zap.String("node", n.ID), zap.Duration("time", time.Since(start)))
 		if err != nil {
 			return err
 		}
-		log.Printf("adding node version: %s and updating node store: %s\n", nv.ID, nv.Store)
+		s.log.Debug("updating node store and data-flow", zap.String("node-version", nv.ID),
+			zap.String("store", nv.Store))
 		start = time.Now()
 		err = s.etcd.AddNodeVersionAndNodeStore(s.projectID, &nv)
-		log.Printf("adding node version: %s and updating node store: %s took %s\n", nv.ID, nv.Store, time.Now().Sub(start))
+		s.log.Info("updated node store and data-flow", zap.String("node-version", nv.ID),
+			zap.String("store", nv.Store), zap.Duration("time", time.Now().Sub(start)))
 		if err != nil {
 			return err
 		}
 		// must index the metadata in the elastic
 		return nil
 	})
-	log.Printf("processing file %s from %s took %s\n", event.Name, event.Bucket, time.Now().Sub(mStart))
+	s.log.Info("processed file", zap.String("name", event.Name),
+		zap.String("bucket", event.Bucket), zap.Duration("time", time.Since(mStart)))
 	return err
 }
 
@@ -278,7 +287,7 @@ func (s *VeroStore) addIfPathNotExists(path string, tx *datastore.Transaction) e
 		CreatedDate:      time.Now().Format(time.RFC3339),
 		LastModifiedDate: time.Now().Format(time.RFC3339),
 	}
-	log.Printf("adding new path: %s\n", path)
+	s.log.Info("adding new path", zap.String("path", path))
 	_, err = tx.Put(key, &n)
 	if err != nil {
 		return err

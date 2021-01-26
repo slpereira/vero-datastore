@@ -1,13 +1,14 @@
 package store
 
 import (
-	"log"
+	"go.uber.org/zap"
 	"testing"
 )
 
 func TestVeroEtcdClient_SumNodeStore(t *testing.T) {
 	t.Run("test-sum-node-non-existent", func(t *testing.T) {
-		e, err := NewVeroEtcdClient([]string{"104.197.29.130:2379"})
+		log := zap.NewExample()
+		e, err := NewVeroEtcdClient([]string{"104.197.29.130:2379"}, log)
 		if err != nil {
 			t.Fatalf("error getting etcd client: %v", err)
 		}
@@ -15,6 +16,8 @@ func TestVeroEtcdClient_SumNodeStore(t *testing.T) {
 		if err != nil {
 			t.Fatalf("error sum node store data: %v", err)
 		}
-		log.Printf("resp => %v", got)
+		log.Info("response", zap.String("name", got.Name),
+		zap.String("path", got.Path),
+		zap.Int("length", got.TotalSpace))
 	})
 }

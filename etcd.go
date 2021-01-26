@@ -8,20 +8,21 @@ import (
 	"github.com/coreos/etcd/clientv3/concurrency"
 	"github.com/dgryski/trifles/uuid"
 	"github.com/slpereira/vero-datastore/model"
-	"log"
+	"go.uber.org/zap"
 	"path"
 	"time"
 )
 
 type VeroEtcdClient struct {
 	client *clientv3.Client
+	log    *zap.Logger
 }
 
 var ErrNodeStoreNotFound = errors.New("node store not found")
 
-func NewVeroEtcdClient(endpoints []string) (*VeroEtcdClient, error) {
+func NewVeroEtcdClient(endpoints []string, log *zap.Logger) (*VeroEtcdClient, error) {
 	cli, err := clientv3.New(clientv3.Config{
-		Endpoints: endpoints, //   []string{"localhost:2379", "localhost:22379", "localhost:32379"},
+		Endpoints:   endpoints,       //   []string{"localhost:2379", "localhost:22379", "localhost:32379"},
 		DialTimeout: 5 * time.Second, // TODO parmetrize
 	})
 	if err != nil {
@@ -30,6 +31,7 @@ func NewVeroEtcdClient(endpoints []string) (*VeroEtcdClient, error) {
 
 	return &VeroEtcdClient{
 		client: cli,
+		log:    log,
 	}, nil
 }
 
@@ -39,7 +41,7 @@ func (e *VeroEtcdClient) AddNodeVersion(projectID string, nv *model.NodeVersion)
 		return err
 	}
 	id := path.Join(projectID, "node-version", nv.ID)
-	log.Printf("adding key %s to etcd\n", id)
+	e.log.Debug("adding key to etcd", zap.String("key", id))
 	_, err = e.client.Put(context.Background(), id, string(bytes))
 	return err
 }
@@ -51,7 +53,7 @@ func (e *VeroEtcdClient) AddNodeVersionAndNodeStore(projectID string, nv *model.
 	}
 	_, err = concurrency.NewSTM(e.client, func(stm concurrency.STM) error {
 		id := path.Join(projectID, "node-version", nv.ID)
-		log.Printf("adding key %s to etcd\n", id)
+		e.log.Debug("adding key to etcd", zap.String("key", id))
 		stm.Put(id, string(bytes))
 		idNs := path.Join(projectID, "node-store", nv.Store)
 		_, err := e.addNodeStoreSTM(stm, idNs, true, nv.Store, nv.ContentLength, 0, 0)
@@ -60,14 +62,13 @@ func (e *VeroEtcdClient) AddNodeVersionAndNodeStore(projectID string, nv *model.
 	return err
 }
 
-
 func (e *VeroEtcdClient) AddNodeStore(projectID string, ns *model.NodeStore) error {
 	bytes, err := json.Marshal(ns)
 	if err != nil {
 		return err
 	}
 	id := path.Join(projectID, "node-store", ns.ID)
-	log.Printf("adding key %s to etcd\n", id)
+	e.log.Debug("adding key to etcd", zap.String("key", id))
 	_, err = e.client.Put(context.Background(), id, string(bytes))
 	return err
 }
@@ -171,7 +172,6 @@ func (e *VeroEtcdClient) SumNodeStoreAsync(context context.Context, projectID, n
 	_, err = e.client.Put(context, key, string(data))
 	return err
 }
-
 
 func DecodeNodeStore(v []byte) (*model.NodeStore, error) {
 	var ns model.NodeStore

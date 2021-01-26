@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"github.com/slpereira/vero-datastore/model"
+	"go.uber.org/zap"
 	"log"
 	"testing"
 	"time"
@@ -17,7 +18,8 @@ func TestChecksum(t *testing.T) {
 
 func TestVeroDatastore_AddPath(t *testing.T) {
 	t.Run("add-path-complex", func(t *testing.T) {
-		ds, err := NewVeroStore("tatic-vero-qa", "34.121.69.225:6379", "", []string{"104.197.29.130:2379"})
+		log := zap.NewExample()
+		ds, err := NewVeroStore("tatic-vero-qa", "34.121.69.225:6379", "", []string{"104.197.29.130:2379"}, log)
 		if err != nil {
 			log.Fatal(err.Error())
 		}
@@ -41,7 +43,8 @@ func TestVeroDatastore_AddPath(t *testing.T) {
 
 func TestVeroStore_AddFileToVero(t *testing.T) {
 	t.Run("test add file", func(t *testing.T) {
-		ds, err := NewVeroStore("tatic-vero-qa", "34.121.69.225:6379", "", []string{"104.197.29.130:2379"})
+		log := zap.NewExample()
+		ds, err := NewVeroStore("tatic-vero-qa", "34.121.69.225:6379", "", []string{"104.197.29.130:2379"}, log)
 		if err != nil {
 			log.Fatal(err.Error())
 		}
