@@ -55,18 +55,19 @@ type Metadata struct {
 	data map[string]interface{}
 }
 
-func NewMetadata(from map[string]interface{}) Metadata {
-	return Metadata{data: from}
+func NewMetadata(from map[string]interface{}) *Metadata {
+	return &Metadata{data: from}
 }
 
-func (m Metadata) Load(properties []datastore.Property) error {
+func (m *Metadata) Load(properties []datastore.Property) error {
+	m.data = make(map[string]interface{})
 	for _,p := range properties {
 		m.data[p.Name] = p.Value
 	}
 	return nil
 }
 
-func (m Metadata) Save() ([]datastore.Property, error) {
+func (m *Metadata) Save() ([]datastore.Property, error) {
 	var r []datastore.Property
 	for k,v := range m.data {
 		r = append(r, datastore.Property{
@@ -92,7 +93,7 @@ type Node struct {
 	ActiveVersionNumber int         `json:"activeVersionNumber" datastore:"activeVersionNumber,omitempty"`
 	StorageClass        string      `json:"storageClass" datastore:"storgeClass,omitempty"` // There is an error in the name of this property in the entity in datastore
 	Uri                 string      `json:"uri" datastore:"uri,omitempty"`
-	Metadata            Metadata 	`json:"metadata" datastore:"metadata,omitempty"`
+	Metadata            *Metadata 	`json:"metadata" datastore:"metadata,omitempty"`
 	Checksum            string      `json:"checksum" datastore:"checksum,omitempty"`
 	Chunks              []Chunk     `json:"chunks" datastore:"chunks,omitempty"`
 }

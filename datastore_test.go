@@ -58,9 +58,9 @@ func TestVeroStore_AddFileToVero(t *testing.T) {
 			log.Fatal(err.Error())
 		}
 		m := make(map[string]interface{})
-		m["tag"] = []string{"tag1","tag2"}
+		m["tag"] = "tag1,tag2"
 		ev := model.GCSEvent{
-			Name:           "vup2.db",
+			Name:           "vup19.db",
 			Bucket:         "tatic-vero-in",
 			ContentType:    "text/plain",
 			TimeCreated:    time.Now(),
@@ -77,7 +77,7 @@ func TestVeroStore_AddFileToVero(t *testing.T) {
 		}
 
 		ev = model.GCSEvent{
-			Name:           "../../vup3.db",
+			Name:           "../../vup4.db",
 			Bucket:         "tatic-vero-in",
 			ContentType:    "text/plain",
 			TimeCreated:    time.Now(),
