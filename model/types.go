@@ -49,8 +49,8 @@ const (
 )
 
 type Node struct {
-	ID                  string                 `json:"id",datastore:"id"`
-	Name                string                 `json:"name",datastore:"name,omitempty"`
+	ID                  string                 `json:"id" datastore:"id"`
+	Name                string                 `json:"name" datastore:"name,omitempty"`
 	ContentType         string                 `json:"contentType" datastore:"contentType,omitempty"`
 	ContentLength       int                    `json:"contentLength" datastore:"contentLength,noindex,omitempty"`
 	NodeType            int                    `json:"type" datastore:"type,omitempty"`
@@ -85,8 +85,8 @@ type NodeStore struct {
 }
 
 type NodeVersion struct {
-	ID            string   `json:"id",datastore:"id"`
-	NodeID        string   `json:"nodeId",datastore:"nodeId"`
+	ID            string   `json:"id" datastore:"id"`
+	NodeID        string   `json:"nodeId" datastore:"nodeId"`
 	ContentType   string   `json:"contentType" datastore:"contentType"`
 	ContentLength int      `json:"contentLength" datastore:"contentLength,noindex"`
 	Store         string   `json:"store" datastore:"store"`

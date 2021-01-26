@@ -5,6 +5,7 @@ import (
 	"github.com/slpereira/vero-datastore/model"
 	"go.uber.org/zap"
 	"log"
+	"net/url"
 	"testing"
 	"time"
 )
@@ -15,6 +16,14 @@ func TestChecksum(t *testing.T) {
 		log.Printf("value: %s", got)
 	})
 }
+
+func TestEncoding(t *testing.T) {
+	t.Run("test-encoding", func(t *testing.T) {
+		urlt, _ := url.ParseRequestURI ("gs://teste/uname/utest/silvioção")
+		log.Printf("%v\n", urlt)
+	})
+}
+
 
 func TestVeroDatastore_AddPath(t *testing.T) {
 	t.Run("add-path-complex", func(t *testing.T) {

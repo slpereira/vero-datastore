@@ -23,6 +23,8 @@ type VeroStore struct {
 	projectID      string
 	cache          *Cache
 	pathExpiration time.Duration
+	topicIndexing  string
+	topicInvoice   string
 }
 
 func NewVeroStore(projectID, redisAddress, redisPwd string, etcdEndpoints []string, log *zap.Logger) (*VeroStore, error) {
@@ -36,7 +38,6 @@ func NewVeroStore(projectID, redisAddress, redisPwd string, etcdEndpoints []stri
 	pathExpiration, err := time.ParseDuration(pathExpStr)
 
 	if err != nil {
-		log.Warn("invalid path cache ttl param", zap.Error(err))
 		pathExpiration = 0
 	}
 
@@ -128,7 +129,7 @@ func (s *VeroStore) AddFileToVero(ctx context.Context, event model.GCSEvent) err
 	}
 	_, err = s.client.RunInTransaction(ctx, func(tx *datastore.Transaction) error {
 		// Node
-		nodeID := filepath.Join("/", filepath.Clean(event.Name))
+		nodeID := filepath.Join("/", event.Name)
 		nodeKey := datastore.NameKey("Node", nodeID, nil)
 		var n model.Node
 		var nv model.NodeVersion
@@ -150,7 +151,11 @@ func (s *VeroStore) AddFileToVero(ctx context.Context, event model.GCSEvent) err
 			n.ContentLength = size
 			n.CreatedDate = event.TimeCreated.Format(time.RFC3339)
 			n.LastModifiedDate = event.Updated.Format(time.RFC3339)
-			n.Uri = url.QueryEscape(fmt.Sprintf("gs://%s/%s", event.Bucket, event.Name))
+			urlEncoded, err := url.ParseRequestURI(fmt.Sprintf("gs://%s/%s", event.Bucket, event.Name))
+			if err != nil {
+				return err
+			}
+			n.Uri = urlEncoded.String()
 			n.StorageClass = "Standard"
 			n.ActiveVersionNumber = 1
 			n.Checksum = cs
