@@ -219,8 +219,14 @@ func (s *VeroStore) AddFileToVero(ctx context.Context, event model.GCSEvent) err
 		// must index the metadata in the elastic
 		return nil
 	})
-	s.log.Info("processed file", zap.String("name", event.Name),
-		zap.String("bucket", event.Bucket), zap.Duration("time", time.Since(mStart)))
+	if err != nil {
+		s.log.Error("processed file with error", zap.String("name", event.Name),
+			zap.String("bucket", event.Bucket), zap.Duration("time", time.Since(mStart)),
+			zap.Error(err))
+	} else {
+		s.log.Info("processed file", zap.String("name", event.Name),
+			zap.String("bucket", event.Bucket), zap.Duration("time", time.Since(mStart)))
+	}
 	return err
 }
 
