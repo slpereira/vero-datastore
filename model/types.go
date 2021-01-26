@@ -49,22 +49,22 @@ const (
 )
 
 type Node struct {
-	ID                  string                 `json:"id" datastore:"id"`
-	Name                string                 `json:"name" datastore:"name,omitempty"`
-	ContentType         string                 `json:"contentType" datastore:"contentType,omitempty"`
-	ContentLength       int                    `json:"contentLength" datastore:"contentLength,noindex,omitempty"`
-	NodeType            int                    `json:"type" datastore:"type,omitempty"`
-	Owner               string                 `json:"owner" datastore:"owner,omitempty"`
-	Store               string                 `json:"store" datastore:"store,omitempty"`
-	Path                string                 `json:"path" datastore:"path,omitempty"`
-	CreatedDate         string                 `json:"createdDate" datastore:"createdDate,omitempty"`
-	LastModifiedDate    string                 `json:"lastModifiedDate" datastore:"lastModifiedDate,omitempty"`
-	ActiveVersionNumber int                    `json:"activeVersionNumber" datastore:"activeVersionNumber,omitempty"`
-	StorageClass        string                 `json:"storageClass" datastore:"storgeClass,omitempty"` // There is an error in the name of this property in the entity in datastore
-	Uri                 string                 `json:"uri" datastore:"uri,omitempty"`
-	Metadata            map[string]interface{} `json:"metadata" datastore:"metadata,omitempty"`
-	Checksum            string                 `json:"checksum" datastore:"checksum,omitempty"`
-	Chunks              []Chunk                `json:"chunks" datastore:"chunks,omitempty"`
+	ID                  string      `json:"id" datastore:"id"`
+	Name                string      `json:"name" datastore:"name,omitempty"`
+	ContentType         string      `json:"contentType" datastore:"contentType,omitempty"`
+	ContentLength       int         `json:"contentLength" datastore:"contentLength,noindex,omitempty"`
+	NodeType            int         `json:"type" datastore:"type,omitempty"`
+	Owner               string      `json:"owner" datastore:"owner,omitempty"`
+	Store               string      `json:"store" datastore:"store,omitempty"`
+	Path                string      `json:"path" datastore:"path,omitempty"`
+	CreatedDate         string      `json:"createdDate" datastore:"createdDate,omitempty"`
+	LastModifiedDate    string      `json:"lastModifiedDate" datastore:"lastModifiedDate,omitempty"`
+	ActiveVersionNumber int         `json:"activeVersionNumber" datastore:"activeVersionNumber,omitempty"`
+	StorageClass        string      `json:"storageClass" datastore:"storgeClass,omitempty"` // There is an error in the name of this property in the entity in datastore
+	Uri                 string      `json:"uri" datastore:"uri,omitempty"`
+	Metadata            interface{} `json:"metadata" datastore:"metadata,omitempty"`
+	Checksum            string      `json:"checksum" datastore:"checksum,omitempty"`
+	Chunks              []Chunk     `json:"chunks" datastore:"chunks,omitempty"`
 }
 
 type Chunk struct {

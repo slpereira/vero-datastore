@@ -133,10 +133,10 @@ func (s *VeroStore) AddFileToVero(ctx context.Context, event model.GCSEvent) err
 		nodeKey := datastore.NameKey("Node", nodeID, nil)
 		var n model.Node
 		var nv model.NodeVersion
-		s.log.Debug("looking for node",zap.String("name", event.Name))
+		s.log.Debug("searching for node",zap.String("name", event.Name))
 		start := time.Now()
 		err := tx.Get(nodeKey, &n)
-		s.log.Info("looked for node", zap.String("name", event.Name), zap.Duration("time", time.Since(start)))
+		s.log.Info("node searched", zap.String("name", event.Name), zap.Duration("time", time.Since(start)))
 		if err != nil && err != datastore.ErrNoSuchEntity {
 			return err
 		}
@@ -174,12 +174,25 @@ func (s *VeroStore) AddFileToVero(ctx context.Context, event model.GCSEvent) err
 				s.log.Warn("same checksum", zap.String("name", event.Name), zap.String("bucket", event.Bucket))
 				return nil
 			}
+			// TODO(silvio) if the new file is replacing an existing file in the bucket before the compression execute, it is not a new version
+			// the new version happens only if the current file is already compressed in the destination bucket
+			// is necessary to have some approach to guarantee isolation for compression process and the current file in the bucket
+
 			// Node exists, we are updating the file, checking versioning and if the file really changed comparing the Checksum
 			n.ActiveVersionNumber++
 			n.Store = event.Bucket
 			n.ContentType = event.ContentType
 			n.ContentLength = size
 			n.LastModifiedDate = event.Updated.Format(time.RFC3339)
+			var p datastore.PropertyList
+			for k,v := range event.Metadata {
+				p = append(p, datastore.Property{
+					Name:    k,
+					Value:   v,
+				})
+			}
+			n.Metadata = p
+			n.Checksum = cs
 		}
 
 		// New Node Version
