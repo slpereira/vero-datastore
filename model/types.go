@@ -2,6 +2,7 @@ package model
 
 import (
 	"cloud.google.com/go/datastore"
+	"encoding/json"
 	"time"
 )
 
@@ -61,7 +62,7 @@ func NewMetadata(from map[string]interface{}) *Metadata {
 
 func (m *Metadata) Load(properties []datastore.Property) error {
 	m.data = make(map[string]interface{})
-	for _,p := range properties {
+	for _, p := range properties {
 		m.data[p.Name] = p.Value
 	}
 	return nil
@@ -69,33 +70,49 @@ func (m *Metadata) Load(properties []datastore.Property) error {
 
 func (m *Metadata) Save() ([]datastore.Property, error) {
 	var r []datastore.Property
-	for k,v := range m.data {
+	for k, v := range m.data {
+		s, ok := v.(string)
+		if ok {
+			var js interface{}
+			// try to parse the json value
+			err := json.Unmarshal([]byte(s), &js)
+			if err == nil {
+				// if the value was parsed add it to the response array
+				r = append(r, datastore.Property{
+					Name:    k,
+					Value:   js,
+					NoIndex: false,
+				})
+				continue
+			}
+		}
 		r = append(r, datastore.Property{
 			Name:    k,
 			Value:   v,
 			NoIndex: false,
 		})
+
 	}
 	return r, nil
 }
 
 type Node struct {
-	ID                  string      `json:"id" datastore:"id"`
-	Name                string      `json:"name" datastore:"name,omitempty"`
-	ContentType         string      `json:"contentType" datastore:"contentType,omitempty"`
-	ContentLength       int         `json:"contentLength" datastore:"contentLength,noindex,omitempty"`
-	NodeType            int         `json:"type" datastore:"type,omitempty"`
-	Owner               string      `json:"owner" datastore:"owner,omitempty"`
-	Store               string      `json:"store" datastore:"store,omitempty"`
-	Path                string      `json:"path" datastore:"path,omitempty"`
-	CreatedDate         string      `json:"createdDate" datastore:"createdDate,omitempty"`
-	LastModifiedDate    string      `json:"lastModifiedDate" datastore:"lastModifiedDate,omitempty"`
-	ActiveVersionNumber int         `json:"activeVersionNumber" datastore:"activeVersionNumber,omitempty"`
-	StorageClass        string      `json:"storageClass" datastore:"storgeClass,omitempty"` // There is an error in the name of this property in the entity in datastore
-	Uri                 string      `json:"uri" datastore:"uri,omitempty"`
-	Metadata            *Metadata 	`json:"metadata" datastore:"metadata,omitempty"`
-	Checksum            string      `json:"checksum" datastore:"checksum,omitempty"`
-	Chunks              []Chunk     `json:"chunks" datastore:"chunks,omitempty"`
+	ID                  string    `json:"id" datastore:"id"`
+	Name                string    `json:"name" datastore:"name,omitempty"`
+	ContentType         string    `json:"contentType" datastore:"contentType,omitempty"`
+	ContentLength       int       `json:"contentLength" datastore:"contentLength,noindex,omitempty"`
+	NodeType            int       `json:"type" datastore:"type,omitempty"`
+	Owner               string    `json:"owner" datastore:"owner,omitempty"`
+	Store               string    `json:"store" datastore:"store,omitempty"`
+	Path                string    `json:"path" datastore:"path,omitempty"`
+	CreatedDate         string    `json:"createdDate" datastore:"createdDate,omitempty"`
+	LastModifiedDate    string    `json:"lastModifiedDate" datastore:"lastModifiedDate,omitempty"`
+	ActiveVersionNumber int       `json:"activeVersionNumber" datastore:"activeVersionNumber,omitempty"`
+	StorageClass        string    `json:"storageClass" datastore:"storgeClass,omitempty"` // There is an error in the name of this property in the entity in datastore
+	Uri                 string    `json:"uri" datastore:"uri,omitempty"`
+	Metadata            *Metadata `json:"metadata" datastore:"metadata,omitempty"`
+	Checksum            string    `json:"checksum" datastore:"checksum,omitempty"`
+	Chunks              []Chunk   `json:"chunks" datastore:"chunks,omitempty"`
 }
 
 type Chunk struct {
