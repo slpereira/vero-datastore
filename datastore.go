@@ -101,7 +101,7 @@ func (s *VeroStore) PutNode(n *model.Node) error {
 }
 
 func (s *VeroStore) PutNodeVersion(n *model.NodeVersion) error {
-	s.log.Debug("datastore:node-version:put", zap.String("ID", n.ID))
+	s.log.Debug("datastore:node-version:put", zap.String("id", n.ID))
 	key := datastore.NameKey("NodeVersion", n.ID, nil)
 	_, err := s.client.Put(context.Background(), key, n)
 	return err
@@ -132,10 +132,10 @@ func (s *VeroStore) AddFileToVero(ctx context.Context, event model.GCSEvent) err
 		nodeKey := datastore.NameKey("Node", nodeID, nil)
 		var n model.Node
 		var nv model.NodeVersion
-		s.log.Debug("looking for node",zap.String("key", nodeKey.Name))
+		s.log.Debug("looking for node",zap.String("name", event.Name))
 		start := time.Now()
 		err := tx.Get(nodeKey, &n)
-		s.log.Info("looked for node", zap.String("key", nodeKey.Name), zap.Duration("time", time.Since(start)))
+		s.log.Info("looked for node", zap.String("name", event.Name), zap.Duration("time", time.Since(start)))
 		if err != nil && err != datastore.ErrNoSuchEntity {
 			return err
 		}
@@ -156,13 +156,13 @@ func (s *VeroStore) AddFileToVero(ctx context.Context, event model.GCSEvent) err
 			n.Checksum = cs
 			n.Metadata = event.Metadata
 			n.Owner = event.Bucket
-			s.log.Debug("checking path", zap.String("path", n.Path))
+			s.log.Debug("checking path", zap.String("path", n.Path), zap.String("name", event.Name))
 			start = time.Now()
 			// add path only if the file is completely new, otherwise the path already exists
 			if err = s.addPathInternally(n.Path, tx); err != nil {
 				return err
 			}
-			s.log.Info("checked path", zap.String("path", n.Path), zap.Duration("time", time.Now().Sub(start)))
+			s.log.Info("checked path", zap.String("path", n.Path), zap.String("name", event.Name), zap.Duration("time", time.Now().Sub(start)))
 		} else {
 			// same file???
 			if cs == n.Checksum {
@@ -198,21 +198,21 @@ func (s *VeroStore) AddFileToVero(ctx context.Context, event model.GCSEvent) err
 		// add everything
 
 		s.log.Debug("adding node version and node", zap.String("node-version", nv.ID),
-			zap.String("node", n.ID))
+			zap.String("node", n.ID), zap.String("name", event.Name))
 		start = time.Now()
 		// add NV
 		_, err = tx.PutMulti([]*datastore.Key{nodeKey, nvKey}, []interface{}{&n, &nv})
 		s.log.Info("added node version and node",  zap.String("node-version", nv.ID),
-			zap.String("node", n.ID), zap.Duration("time", time.Since(start)))
+			zap.String("node", n.ID), zap.Duration("time", time.Since(start)), zap.String("name", event.Name))
 		if err != nil {
 			return err
 		}
 		s.log.Debug("updating node store and data-flow", zap.String("node-version", nv.ID),
-			zap.String("store", nv.Store))
+			zap.String("store", nv.Store), zap.String("name", event.Name))
 		start = time.Now()
 		err = s.etcd.AddNodeVersionAndNodeStore(s.projectID, &nv)
 		s.log.Info("updated node store and data-flow", zap.String("node-version", nv.ID),
-			zap.String("store", nv.Store), zap.Duration("time", time.Now().Sub(start)))
+			zap.String("store", nv.Store), zap.Duration("time", time.Now().Sub(start)), zap.String("name", event.Name))
 		if err != nil {
 			return err
 		}

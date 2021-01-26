@@ -16,7 +16,6 @@ require (
 	github.com/google/go-cmp v0.5.4 // indirect
 	github.com/google/martian/v3 v3.1.0 // indirect
 	github.com/google/uuid v1.1.2 // indirect
-	github.com/spf13/viper v1.7.1
 	go.opencensus.io v0.22.5 // indirect
 	go.uber.org/multierr v1.6.0 // indirect
 	go.uber.org/zap v1.16.0
