@@ -159,14 +159,9 @@ func (s *VeroStore) AddFileToVero(ctx context.Context, event model.GCSEvent) err
 			n.StorageClass = "Standard"
 			n.ActiveVersionNumber = 1
 			n.Checksum = cs
-			var p datastore.PropertyList
-			for k,v := range event.Metadata {
-				p = append(p, datastore.Property{
-					Name:    k,
-					Value:   v,
-				})
+			if event.Metadata != nil {
+				n.Metadata = model.NewMetadata(event.Metadata)
 			}
-			n.Metadata = p
 			n.Owner = event.Bucket
 			s.log.Debug("checking path", zap.String("path", n.Path), zap.String("name", event.Name))
 			start = time.Now()
@@ -191,14 +186,9 @@ func (s *VeroStore) AddFileToVero(ctx context.Context, event model.GCSEvent) err
 			n.ContentType = event.ContentType
 			n.ContentLength = size
 			n.LastModifiedDate = event.Updated.Format(time.RFC3339)
-			var p datastore.PropertyList
-			for k,v := range event.Metadata {
-				p = append(p, datastore.Property{
-					Name:    k,
-					Value:   v,
-				})
+			if event.Metadata != nil {
+				n.Metadata = model.NewMetadata(event.Metadata)
 			}
-			n.Metadata = p
 			n.Checksum = cs
 		}
 
