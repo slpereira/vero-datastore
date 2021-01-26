@@ -57,6 +57,8 @@ func TestVeroStore_AddFileToVero(t *testing.T) {
 		if err != nil {
 			log.Fatal(err.Error())
 		}
+		m := make(map[string]interface{})
+		m["tag"] = []string{"tag1","tag2"}
 		ev := model.GCSEvent{
 			Name:           "vup2.db",
 			Bucket:         "tatic-vero-in",
@@ -68,7 +70,7 @@ func TestVeroStore_AddFileToVero(t *testing.T) {
 			StorageClass:   "standard",
 			Size:           "10240",
 			MD5Hash:        "qNVG+7DkxIGwj+MXxQu2+w==",
-			Metadata:       nil,
+			Metadata:       m,
 		}
 		if err := ds.AddFileToVero(context.Background(), ev); err != nil {
 			t.Errorf("AddFileToVero() error = %v", err)
