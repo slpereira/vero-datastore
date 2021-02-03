@@ -2,11 +2,14 @@ package store
 
 import (
 	"cloud.google.com/go/datastore"
+	"cloud.google.com/go/pubsub"
 	"context"
 	b64 "encoding/base64"
+	"encoding/json"
 	"fmt"
 	"github.com/slpereira/vero-datastore/model"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -17,22 +20,38 @@ import (
 
 // VeroStore implements the access to the datastore, but include some cache for some objects
 type VeroStore struct {
-	log            *zap.Logger
-	client         *datastore.Client
-	etcd           *VeroEtcdClient
-	projectID      string
-	cache          *Cache
-	pathExpiration time.Duration
-	topicIndexing  string
-	topicInvoice   string
+	log               *zap.Logger
+	dsClient          *datastore.Client
+	psClient          *pubsub.Client
+	etcd              *VeroEtcdClient
+	projectID         string
+	cache             *Cache
+	pathExpiration    time.Duration
+	namespaceIndex    string
+	topicIndexing     *pubsub.Topic
+	topicInvoice      *pubsub.Topic
+	topicFallbackEtcd *pubsub.Topic
+	doNotAddPath      bool
+	versioning        bool
+	doNotIndex        bool
+	doNotLoadInvoice  bool
 }
 
-func NewVeroStore(projectID, redisAddress, redisPwd string, etcdEndpoints []string, log *zap.Logger) (*VeroStore, error) {
-	cl, err := datastore.NewClient(context.Background(), projectID)
+func NewVeroStore(projectID string, redisAddress []string, redisPwd string,
+	etcdEndpoints []string, etcdUser, etcdPwd string, log *zap.Logger, versioning bool,
+	doNotIndex bool, doNotAddPath bool, doNotLoadInvoice bool,
+	topicIndexing string, topicInvoice string, topicFallbackEtcd string,
+	namespaceIndex string) (*VeroStore, error) {
+	dsClient, err := datastore.NewClient(context.Background(), projectID)
 	if err != nil {
 		return nil, err
 	}
 
+	psClient, err := pubsub.NewClient(context.Background(), projectID)
+	if err != nil {
+		dsClient.Close()
+		return nil, err
+	}
 	pathExpStr := os.Getenv("PATH_CACHE_TTL")
 
 	pathExpiration, err := time.ParseDuration(pathExpStr)
@@ -41,25 +60,47 @@ func NewVeroStore(projectID, redisAddress, redisPwd string, etcdEndpoints []stri
 		pathExpiration = 0
 	}
 
-	etcd, err := NewVeroEtcdClient(etcdEndpoints, log)
+	etcd, err := NewVeroEtcdClient(etcdEndpoints, etcdUser, etcdPwd, log)
 	if err != nil {
+		dsClient.Close()
+		psClient.Close()
 		return nil, err
 	}
 
-	return &VeroStore{client: cl,
-		projectID:      projectID,
-		cache:          NewCache(redisAddress, redisPwd),
-		pathExpiration: pathExpiration,
-		etcd:           etcd,
-		log:            log,
+	return &VeroStore{dsClient: dsClient,
+		psClient:          psClient,
+		projectID:         projectID,
+		cache:             NewCache(redisAddress, redisPwd, true),
+		pathExpiration:    pathExpiration,
+		etcd:              etcd,
+		log:               log,
+		versioning:        versioning,
+		doNotAddPath:      doNotAddPath,
+		doNotIndex:        doNotIndex,
+		doNotLoadInvoice:  doNotLoadInvoice,
+		topicIndexing:     psClient.Topic(topicIndexing),
+		topicInvoice:      psClient.Topic(topicInvoice),
+		topicFallbackEtcd: psClient.Topic(topicFallbackEtcd),
+		namespaceIndex:    namespaceIndex,
 	}, nil
+}
+
+func (s *VeroStore) Close() error {
+	s.topicFallbackEtcd.Stop()
+	s.topicInvoice.Stop()
+	s.topicIndexing.Stop()
+	s.psClient.Close()
+	s.dsClient.Close()
+	s.etcd.Close()
+	s.cache.Close()
+	return nil
 }
 
 func (s *VeroStore) GetNode(ID string) (*model.Node, error) {
 	s.log.Debug("datastore:node:get", zap.String("id", ID))
 	key := datastore.NameKey("Node", ID, nil)
 	var n model.Node
-	err := s.client.Get(context.Background(), key, &n)
+	err := s.dsClient.Get(context.Background(), key, &n)
 	if err != nil {
 		if err == datastore.ErrNoSuchEntity {
 			return nil, nil
@@ -75,7 +116,7 @@ func (s *VeroStore) GetNodeVersion(ID string) (*model.NodeVersion, error) {
 	s.log.Debug("datastore:node-version:get", zap.String("id", ID))
 	key := datastore.NameKey("NodeVersion", ID, nil)
 	var n model.NodeVersion
-	err := s.client.Get(context.Background(), key, &n)
+	err := s.dsClient.Get(context.Background(), key, &n)
 	if err != nil {
 		if err == datastore.ErrNoSuchEntity {
 			return nil, nil
@@ -94,7 +135,7 @@ func (s *VeroStore) GetNodeVersion(ID string) (*model.NodeVersion, error) {
 func (s *VeroStore) PutNode(n *model.Node) error {
 	s.log.Debug("datastore:node:put", zap.String("id", n.ID))
 	key := datastore.NameKey("Node", n.ID, nil)
-	_, err := s.client.Put(context.Background(), key, &n)
+	_, err := s.dsClient.Put(context.Background(), key, &n)
 	if err != nil {
 		return err
 	}
@@ -104,10 +145,11 @@ func (s *VeroStore) PutNode(n *model.Node) error {
 func (s *VeroStore) PutNodeVersion(n *model.NodeVersion) error {
 	s.log.Debug("datastore:node-version:put", zap.String("id", n.ID))
 	key := datastore.NameKey("NodeVersion", n.ID, nil)
-	_, err := s.client.Put(context.Background(), key, n)
+	_, err := s.dsClient.Put(context.Background(), key, n)
 	return err
 }
 
+// AddFileToVero add a new file to vero dora doc structure
 func (s *VeroStore) AddFileToVero(ctx context.Context, event model.GCSEvent) error {
 	s.log.Info("add file to vero", zap.String("name", event.Name),
 		zap.String("bucket", event.Bucket))
@@ -127,19 +169,20 @@ func (s *VeroStore) AddFileToVero(ctx context.Context, event model.GCSEvent) err
 	if err != nil {
 		return err
 	}
-	_, err = s.client.RunInTransaction(ctx, func(tx *datastore.Transaction) error {
+	_, err = s.dsClient.RunInTransaction(ctx, func(tx *datastore.Transaction) error {
 		// Node
 		nodeID := filepath.Join("/", event.Name)
 		nodeKey := datastore.NameKey("Node", nodeID, nil)
 		var n model.Node
 		var nv model.NodeVersion
-		s.log.Debug("searching for node",zap.String("name", event.Name))
+		s.log.Debug("searching for node", zap.String("name", event.Name))
 		start := time.Now()
 		err := tx.Get(nodeKey, &n)
 		s.log.Info("node searched", zap.String("name", event.Name), zap.Duration("time", time.Since(start)))
 		if err != nil && err != datastore.ErrNoSuchEntity {
 			return err
 		}
+		delta := 0
 		// New Node
 		if err == datastore.ErrNoSuchEntity {
 			n.Name = filepath.Base(nodeID)
@@ -165,9 +208,11 @@ func (s *VeroStore) AddFileToVero(ctx context.Context, event model.GCSEvent) err
 			n.Owner = event.Bucket
 			s.log.Debug("checking path", zap.String("path", n.Path), zap.String("name", event.Name))
 			start = time.Now()
-			// add path only if the file is completely new, otherwise the path already exists
-			if err = s.addPathInternally(n.Path, tx); err != nil {
-				return err
+			if !s.doNotAddPath {
+				// add path only if the file is completely new, otherwise the path already exists
+				if err = s.addPathInternally(n.Path, tx); err != nil {
+					return err
+				}
 			}
 			s.log.Info("checked path", zap.String("path", n.Path), zap.String("name", event.Name), zap.Duration("time", time.Now().Sub(start)))
 		} else {
@@ -176,12 +221,18 @@ func (s *VeroStore) AddFileToVero(ctx context.Context, event model.GCSEvent) err
 				s.log.Warn("same checksum", zap.String("name", event.Name), zap.String("bucket", event.Bucket))
 				return nil
 			}
-			// TODO(silvio) if the new file is replacing an existing file in the bucket before the compression execute, it is not a new version
+			// TODO(silvio) if the new file is replacing an existing file in the bucket before the compression being executed, it is not a new version
 			// the new version happens only if the current file is already compressed in the destination bucket
 			// is necessary to have some approach to guarantee isolation for compression process and the current file in the bucket
+			// that is, the file cannot be processed while is being updated
 
 			// Node exists, we are updating the file, checking versioning and if the file really changed comparing the Checksum
-			n.ActiveVersionNumber++
+			if s.versioning {
+				n.ActiveVersionNumber++
+				s.log.Debug("new version", zap.String("name", event.Name), zap.String("bucket", event.Bucket), zap.Int("version", n.ActiveVersionNumber))
+			} else {
+				delta = n.ContentLength
+			}
 			n.Store = event.Bucket
 			n.ContentType = event.ContentType
 			n.ContentLength = size
@@ -217,21 +268,57 @@ func (s *VeroStore) AddFileToVero(ctx context.Context, event model.GCSEvent) err
 		start = time.Now()
 		// add NV
 		_, err = tx.PutMulti([]*datastore.Key{nodeKey, nvKey}, []interface{}{&n, &nv})
-		s.log.Info("added node version and node",  zap.String("node-version", nv.ID),
-			zap.String("node", n.ID), zap.Duration("time", time.Since(start)), zap.String("name", event.Name))
 		if err != nil {
+			return err
+		}
+		s.log.Info("added node version and node", zap.String("node-version", nv.ID),
+			zap.String("node", n.ID), zap.Duration("time", time.Since(start)), zap.String("name", event.Name))
+
+		// TODO(silvio) the following operations must be executed outside the datastore transaction???
+		// * send message to topics for indexing and invoice loader
+		// * add data to etcd
+
+		g := new(errgroup.Group)
+		// must index the metadata in the elastic
+		if !s.doNotIndex {
+			// check if there is some metadata telling the process to not index
+			_, ok := event.Metadata["DoNotIndex"]
+			if !ok {
+				g.Go(func() error {
+					return s.sendMessageToIndexTopic(&n)
+				})
+			} else {
+				s.log.Warn("file has metadata DoNotIndex", zap.String("name", event.Name))
+			}
+		}
+		// send message to invoice topic if appropriated
+		if !s.doNotLoadInvoice {
+			_, ok := event.Metadata["DoNotLoadInvoice"]
+			if !ok {
+				g.Go(func() error {
+					return s.sendMessageToInvoiceLoaderTopic(&n)
+				})
+			} else {
+				s.log.Warn("file has metadata DoNotLoadInvoice", zap.String("name", event.Name))
+			}
+		}
+		if err := g.Wait(); err != nil {
 			return err
 		}
 		s.log.Debug("updating node store and data-flow", zap.String("node-version", nv.ID),
 			zap.String("store", nv.Store), zap.String("name", event.Name))
 		start = time.Now()
-		err = s.etcd.AddNodeVersionAndNodeStore(s.projectID, &nv)
-		s.log.Info("updated node store and data-flow", zap.String("node-version", nv.ID),
-			zap.String("store", nv.Store), zap.Duration("time", time.Now().Sub(start)), zap.String("name", event.Name))
+		err = s.etcd.AddNodeVersionToDataFlowAndIncNodeStore(s.projectID, &nv, delta)
 		if err != nil {
-			return err
+			s.log.Warn("etcd not available, fallback to pubsub", zap.Duration("time", time.Now().Sub(start)), zap.String("name", event.Name), zap.Error(err))
+			err = s.sendMessageToFallbackEtcdTopic(&nv, delta)
+			if err != nil {
+				return err
+			}
+		} else {
+			s.log.Info("updated node store and data-flow", zap.String("node-version", nv.ID),
+				zap.String("store", nv.Store), zap.Duration("time", time.Now().Sub(start)), zap.String("name", event.Name))
 		}
-		// must index the metadata in the elastic
 		return nil
 	})
 	if err != nil {
@@ -244,6 +331,115 @@ func (s *VeroStore) AddFileToVero(ctx context.Context, event model.GCSEvent) err
 	}
 	return err
 }
+
+func (s *VeroStore) sendMessageToFallbackEtcdTopic(nv *model.NodeVersion, delta int) error {
+	attrs := make(map[string]string)
+	attrs["delta"] = strconv.Itoa(delta)
+	data, err := json.Marshal(nv)
+	if err != nil {
+		return err
+	}
+	m := &pubsub.Message{
+		Data:       data,
+		Attributes: attrs,
+	}
+	r := s.topicFallbackEtcd.Publish(context.Background(), m)
+	messageID, err := r.Get(context.Background())
+	if err != nil {
+		return err
+	} else {
+		s.log.Info("message published to fallback topic", zap.String("name", nv.NodeID), zap.String("messageId", messageID))
+		return nil
+	}
+}
+
+func (s *VeroStore) sendMessageToIndexTopic(n *model.Node) error {
+	index := s.createElasticIndexStruct(n)
+	data, err := json.Marshal(index)
+	if err != nil {
+		return err
+	}
+	m := &pubsub.Message{
+		Data: data,
+	}
+	r := s.topicIndexing.Publish(context.Background(), m)
+	messageID, err := r.Get(context.Background())
+	if err != nil {
+		return err
+	} else {
+		s.log.Info("message published to index", zap.String("name", n.Name), zap.String("messageId", messageID))
+		return nil
+	}
+}
+
+func (s *VeroStore) sendMessageToInvoiceLoaderTopic(n *model.Node) error {
+	data, err := json.Marshal(n)
+	if err != nil {
+		return err
+	}
+	m := &pubsub.Message{
+		Data: data,
+	}
+	r := s.topicInvoice.Publish(context.Background(), m)
+	messageID, err := r.Get(context.Background())
+	if err != nil {
+		return err
+	} else {
+		s.log.Info("message published to index", zap.String("name", n.Name), zap.String("messageId", messageID))
+		return nil
+	}
+}
+
+
+func (s *VeroStore) createElasticIndexStruct(n *model.Node) *ElasticIndex {
+	return &ElasticIndex{
+		Index: fmt.Sprintf("%s_node", s.namespaceIndex),
+		ID:    n.ID,
+		Body: ElasticBody{
+			Name:             n.Name,
+			Path:             n.Path,
+			ContentType:      strings.Split(n.ContentType, ";")[0],
+			LastModifiedDate: n.LastModifiedDate,
+			Tags:             n.Metadata.Data["tags"],
+		},
+	}
+}
+
+type ElasticBody struct {
+	Name             string      `json:"name"`
+	Path             string      `json:"path"`
+	ContentType      string      `json:"contentType"`
+	LastModifiedDate string      `json:"lastModifiedDate"`
+	Tags             interface{} `json:"tags,omitempty"`
+}
+
+type ElasticIndex struct {
+	Index string      `json:"index"`
+	ID    string      `json:"id"`
+	Body  ElasticBody `json:"body"`
+}
+
+// ---
+//     const body = {
+//        name: document.name,
+//        path: document.path,
+//        contentType: document.contentType.split(';')[0],
+//        lastModifiedDate: document.lastModifiedDate,
+//    };
+//
+//    if (document.metadata && document.metadata.tags) {
+//        body.tags = document.metadata.tags;
+//    }
+//
+//    const elastic = Elastic.getClient();
+//    const namespace = Elastic.getNamespace();
+//    const index = namespace ? `${namespace}_node` : 'node';
+//
+//    await elastic.index({
+//        index,
+//        id: document.id,
+//        body,
+//    });
 
 func (s *VeroStore) addPathToCache(key *datastore.Key) {
 	_ = s.cache.Put(s.projectID+"/path/"+key.Name, time.Now().Format(time.RFC3339), s.pathExpiration)
@@ -278,7 +474,7 @@ func (s *VeroStore) addPathInternally(path string, tx *datastore.Transaction) er
 	if tx != nil {
 		return s.addIfPathNotExists(path, tx)
 	} else {
-		_, err := s.client.RunInTransaction(context.Background(), func(tx *datastore.Transaction) error {
+		_, err := s.dsClient.RunInTransaction(context.Background(), func(tx *datastore.Transaction) error {
 			return s.addIfPathNotExists(path, tx)
 		})
 		return err

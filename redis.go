@@ -7,16 +7,19 @@ import (
 )
 
 type Cache struct {
-	client *redis.Client
+	client                  *redis.ClusterClient
+	allowNotConnectedOption bool
 }
 
-func NewCache(address, password string) *Cache {
-	rdb := redis.NewClient(&redis.Options{
-		Addr:     address,
+func NewCache(addrs []string, password string, allowNotConnectedOption bool) *Cache {
+	rdb := redis.NewClusterClient(&redis.ClusterOptions{
+		Addrs:    addrs,
 		Password: password, // no password set
-		DB:       0,        // use default DB
 	})
-	return &Cache{rdb}
+	return &Cache{
+		client:                  rdb,
+		allowNotConnectedOption: allowNotConnectedOption,
+	}
 }
 
 func (c *Cache) Exists(key string) (bool, error) {
@@ -25,17 +28,28 @@ func (c *Cache) Exists(key string) (bool, error) {
 		if err == redis.Nil {
 			return false, nil
 		}
+		if c.allowNotConnectedOption {
+			return false, nil
+		}
 		return false, err
 	}
 	return r > 0, err
 }
 
 func (c *Cache) Put(key, value string, expiration time.Duration) error {
-	return c.client.Set(context.Background(), key, value, expiration).Err()
+	err := c.client.Set(context.Background(), key, value, expiration).Err()
+	if err != nil && c.allowNotConnectedOption {
+		return nil
+	}
+	return err
 }
 
 func (c *Cache) Remove(key string) error {
-	return c.client.Del(context.Background(), key).Err()
+	err := c.client.Del(context.Background(), key).Err()
+	if err != nil && c.allowNotConnectedOption {
+		return nil
+	}
+	return err
 }
 
 func (c *Cache) Close() error {

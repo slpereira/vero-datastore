@@ -53,24 +53,29 @@ const (
 )
 
 type Metadata struct {
-	data map[string]interface{}
+	Data map[string]interface{}
 }
 
 func NewMetadata(from map[string]interface{}) *Metadata {
-	return &Metadata{data: from}
+	return &Metadata{Data: from}
+}
+
+func (m *Metadata) HasKey(key string) bool {
+	_, ok := m.Data[key]
+	return ok
 }
 
 func (m *Metadata) Load(properties []datastore.Property) error {
-	m.data = make(map[string]interface{})
+	m.Data = make(map[string]interface{})
 	for _, p := range properties {
-		m.data[p.Name] = p.Value
+		m.Data[p.Name] = p.Value
 	}
 	return nil
 }
 
 func (m *Metadata) Save() ([]datastore.Property, error) {
 	var r []datastore.Property
-	for k, v := range m.data {
+	for k, v := range m.Data {
 		s, ok := v.(string)
 		if ok {
 			var js interface{}
