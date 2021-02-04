@@ -3,6 +3,7 @@ package store
 import (
 	"cloud.google.com/go/datastore"
 	"cloud.google.com/go/pubsub"
+	"cloud.google.com/go/storage"
 	"context"
 	b64 "encoding/base64"
 	"encoding/json"
@@ -23,6 +24,7 @@ type VeroStore struct {
 	log               *zap.Logger
 	dsClient          *datastore.Client
 	psClient          *pubsub.Client
+	stClient          *storage.Client
 	etcd              *VeroEtcdClient
 	projectID         string
 	cache             *Cache
@@ -31,6 +33,7 @@ type VeroStore struct {
 	topicIndexing     *pubsub.Topic
 	topicInvoice      *pubsub.Topic
 	topicFallbackEtcd *pubsub.Topic
+	topicDelete       *pubsub.Topic
 	doNotAddPath      bool
 	versioning        bool
 	doNotIndex        bool
@@ -41,7 +44,7 @@ func NewVeroStore(projectID string, redisAddress []string, redisPwd string,
 	etcdEndpoints []string, etcdUser, etcdPwd string, log *zap.Logger, versioning bool,
 	doNotIndex bool, doNotAddPath bool, doNotLoadInvoice bool,
 	topicIndexing string, topicInvoice string, topicFallbackEtcd string,
-	namespaceIndex string) (*VeroStore, error) {
+	topicDelete string, namespaceIndex string) (*VeroStore, error) {
 	dsClient, err := datastore.NewClient(context.Background(), projectID)
 	if err != nil {
 		return nil, err
@@ -52,6 +55,14 @@ func NewVeroStore(projectID string, redisAddress []string, redisPwd string,
 		dsClient.Close()
 		return nil, err
 	}
+
+	stClient, err := storage.NewClient(context.Background())
+	if err != nil {
+		dsClient.Close()
+		psClient.Close()
+		return nil, err
+	}
+
 	pathExpStr := os.Getenv("PATH_CACHE_TTL")
 
 	pathExpiration, err := time.ParseDuration(pathExpStr)
@@ -64,6 +75,7 @@ func NewVeroStore(projectID string, redisAddress []string, redisPwd string,
 	if err != nil {
 		dsClient.Close()
 		psClient.Close()
+		stClient.Close()
 		return nil, err
 	}
 
@@ -80,7 +92,9 @@ func NewVeroStore(projectID string, redisAddress []string, redisPwd string,
 		doNotLoadInvoice:  doNotLoadInvoice,
 		topicIndexing:     psClient.Topic(topicIndexing),
 		topicInvoice:      psClient.Topic(topicInvoice),
+		// TODO(silvio) avoid create these two topics references if they cannot be used in the flow
 		topicFallbackEtcd: psClient.Topic(topicFallbackEtcd),
+		topicDelete:       psClient.Topic(topicDelete),
 		namespaceIndex:    namespaceIndex,
 	}, nil
 }
@@ -91,6 +105,7 @@ func (s *VeroStore) Close() error {
 	s.topicIndexing.Stop()
 	s.psClient.Close()
 	s.dsClient.Close()
+	s.stClient.Close()
 	s.etcd.Close()
 	s.cache.Close()
 	return nil
@@ -159,7 +174,7 @@ func (s *VeroStore) AddFileToVero(ctx context.Context, event model.GCSEvent) err
 		s.log.Warn("zero size file", zap.String("name", event.Name),
 			zap.String("bucket", event.Bucket))
 		// delete from storage
-		return nil
+		return s.sendMessageToDeleteTopic(event.Bucket, event.Name)
 	}
 	cs, err := Checksum(event.MD5Hash)
 	if err != nil {
@@ -219,7 +234,7 @@ func (s *VeroStore) AddFileToVero(ctx context.Context, event model.GCSEvent) err
 			// same file???
 			if cs == n.Checksum {
 				s.log.Warn("same checksum", zap.String("name", event.Name), zap.String("bucket", event.Bucket))
-				return nil
+				return s.sendMessageToDeleteTopic(event.Bucket, event.Name)
 			}
 			// TODO(silvio) if the new file is replacing an existing file in the bucket before the compression being executed, it is not a new version
 			// the new version happens only if the current file is already compressed in the destination bucket
@@ -229,9 +244,10 @@ func (s *VeroStore) AddFileToVero(ctx context.Context, event model.GCSEvent) err
 			// Node exists, we are updating the file, checking versioning and if the file really changed comparing the Checksum
 			if s.versioning {
 				n.ActiveVersionNumber++
-				s.log.Debug("new version", zap.String("name", event.Name), zap.String("bucket", event.Bucket), zap.Int("version", n.ActiveVersionNumber))
+				s.log.Info("new version", zap.String("name", event.Name), zap.String("bucket", event.Bucket), zap.Int("version", n.ActiveVersionNumber))
 			} else {
-				delta = n.ContentLength
+				s.log.Warn("versioning is not enabled", zap.String("name", event.Name), zap.String("bucket", event.Bucket))
+				return s.sendMessageToDeleteTopic(event.Bucket, event.Name)
 			}
 			n.Store = event.Bucket
 			n.ContentType = event.ContentType
@@ -275,9 +291,14 @@ func (s *VeroStore) AddFileToVero(ctx context.Context, event model.GCSEvent) err
 			zap.String("node", n.ID), zap.Duration("time", time.Since(start)), zap.String("name", event.Name))
 
 		// TODO(silvio) the following operations must be executed outside the datastore transaction???
+		// * add hold to the file
 		// * send message to topics for indexing and invoice loader
 		// * add data to etcd
 
+		// add the holds to the file
+		if err := s.addHoldToFile(event.Bucket, event.Name); err != nil {
+			return err
+		}
 		g := new(errgroup.Group)
 		// must index the metadata in the elastic
 		if !s.doNotIndex {
@@ -329,6 +350,16 @@ func (s *VeroStore) AddFileToVero(ctx context.Context, event model.GCSEvent) err
 		s.log.Info("processed file", zap.String("name", event.Name),
 			zap.String("bucket", event.Bucket), zap.Duration("time", time.Since(mStart)))
 	}
+	return err
+}
+
+func (s *VeroStore) addHoldToFile(bucket, name string) error {
+	o := s.stClient.Bucket(bucket).Object(name)
+	objectAttrsToUpdate := storage.ObjectAttrsToUpdate{
+		EventBasedHold: s.versioning,
+		TemporaryHold:  true,
+	}
+	_, err := o.Update(context.Background(), objectAttrsToUpdate)
 	return err
 }
 
@@ -390,6 +421,23 @@ func (s *VeroStore) sendMessageToInvoiceLoaderTopic(n *model.Node) error {
 	}
 }
 
+func (s *VeroStore) sendMessageToDeleteTopic(bucket, name string) error {
+	uri, err := url.Parse(fmt.Sprintf("gs://%s/%s", bucket, name))
+	if err != nil {
+		return err
+	}
+	m := &pubsub.Message{
+		Data: []byte(uri.String()),
+	}
+	r := s.topicInvoice.Publish(context.Background(), m)
+	messageID, err := r.Get(context.Background())
+	if err != nil {
+		return err
+	} else {
+		s.log.Info("message published to delete topic", zap.String("name", name), zap.String("messageId", messageID))
+		return nil
+	}
+}
 
 func (s *VeroStore) createElasticIndexStruct(n *model.Node) *ElasticIndex {
 	return &ElasticIndex{

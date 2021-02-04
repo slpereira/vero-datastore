@@ -41,8 +41,8 @@ func TestVeroDatastore_AddPath(t *testing.T) {
 	t.Run("add-path-complex", func(t *testing.T) {
 		log := zap.NewExample()
 		ds, err := NewVeroStore(
-			"tatic-vero-qa", []string{"34.121.69.225:6379"}, "", []string{"104.197.29.130:2379"}, log,
-			true, false, false, false, "", "", "", "")
+			"tatic-vero-qa", []string{"34.121.69.225:6379"}, "", []string{"104.197.29.130:2379"}, "", "", log,
+			true, false, false, false, "", "", "", "", "")
 		if err != nil {
 			log.Fatal(err.Error())
 		}
@@ -67,8 +67,8 @@ func TestVeroDatastore_AddPath(t *testing.T) {
 func TestVeroStore_AddFileToVero(t *testing.T) {
 	t.Run("test add file", func(t *testing.T) {
 		log := zap.NewExample()
-		ds, err := NewVeroStore("tatic-vero-qa", []string{"34.121.69.225:6379"}, "", []string{"104.197.29.130:2379"}, log,
-			true, false, false, false, "", "", "", "")
+		ds, err := NewVeroStore("tatic-vero-qa", []string{"34.121.69.225:6379"}, "", []string{"104.197.29.130:2379"}, "", "", log,
+			true, false, false, false, "", "", "", "", "")
 		if err != nil {
 			log.Fatal(err.Error())
 		}
@@ -114,8 +114,8 @@ func TestVeroStore_AddFileToVero(t *testing.T) {
 func TestVeroStore_AddFileToVeroTags(t *testing.T) {
 	t.Run("test add file", func(t *testing.T) {
 		log := zap.NewExample()
-		ds, err := NewVeroStore("tatic-vero-qa", []string{"34.121.69.225:6379"}, "", []string{"104.197.29.130:2379"}, log,
-			true, false, false, false, "", "", "", "")
+		ds, err := NewVeroStore("tatic-vero-qa", []string{"34.121.69.225:6379"}, "", []string{"104.197.29.130:2379"}, "", "", log,
+			true, false, false, false, "", "", "", "", "")
 		if err != nil {
 			log.Fatal(err.Error())
 		}
@@ -143,8 +143,9 @@ func TestVeroStore_AddFileToVeroTags(t *testing.T) {
 func TestVeroStore_AddFileToVeroInvalidRedis(t *testing.T) {
 	t.Run("test add file", func(t *testing.T) {
 		log := zap.NewExample()
-		ds, err := NewVeroStore("tatic-vero-qa", []string{"34.121.69.333:6379"}, "", []string{"104.197.29.130:2379"}, log,
-			true, false, false, false, "", "", "", "")
+		ds, err := NewVeroStore("tatic-vero-qa", []string{"34.121.69.333:6379"}, "", []string{"104.197.29.130:2379"}, "",
+			 "", log, true, false, false, false, "", "", "", "",
+			"")
 		if err != nil {
 			log.Fatal(err.Error())
 		}
@@ -172,8 +173,8 @@ func TestVeroStore_AddFileToVeroInvalidRedis(t *testing.T) {
 func TestVeroStore_AddFileToVeroInvalidEtcd(t *testing.T) {
 	t.Run("test add file", func(t *testing.T) {
 		log := zap.NewExample()
-		ds, err := NewVeroStore("dora-varejo", []string{"34.121.69.333:6379"}, "", []string{"127.0.0.1:2379"}, log,
-			true, true, false, true, "", "", "PubSubEtcdFallback", "")
+		ds, err := NewVeroStore("dora-varejo", []string{"34.121.69.333:6379"}, "", []string{"127.0.0.1:2379"},  "", "",
+			log, true, false, true, false, "", "", "PubSubEtcdFallback", "", "")
 		if err != nil {
 			log.Fatal(err.Error())
 		}
