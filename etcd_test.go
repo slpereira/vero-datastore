@@ -8,7 +8,7 @@ import (
 func TestVeroEtcdClient_SumNodeStore(t *testing.T) {
 	t.Run("test-sum-node-non-existent", func(t *testing.T) {
 		log := zap.NewExample()
-		e, err := NewVeroEtcdClient([]string{"104.197.29.130:2379"}, log)
+		e, err := NewVeroEtcdClient([]string{"104.197.29.130:2379"}, "", "", log)
 		if err != nil {
 			t.Fatalf("error getting etcd dsClient: %v", err)
 		}

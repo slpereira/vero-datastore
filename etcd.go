@@ -25,8 +25,10 @@ var ErrEtcdNotConnected = errors.New("etcd not connected")
 func NewVeroEtcdClient(endpoints []string, username, password string, log *zap.Logger) (*VeroEtcdClient, error) {
 	cli, err := clientv3.New(clientv3.Config{
 		Endpoints:   endpoints,       //   []string{"localhost:2379", "localhost:22379", "localhost:32379"},
-		DialTimeout: 5, // TODO parametrize
+		DialTimeout: 5 * time.Second, // TODO parametrize
 		DialKeepAliveTimeout: 5 * time.Second, // TODO parametrize
+		Username: username,
+		Password: password,
 	})
 	if err != nil {
 		return nil, err
