@@ -92,7 +92,7 @@ func NewVeroStore(projectID string, redisAddress []string, redisPwd string,
 		doNotLoadInvoice:  doNotLoadInvoice,
 		topicIndexing:     psClient.Topic(topicIndexing),
 		topicInvoice:      psClient.Topic(topicInvoice),
-		// TODO(silvio) avoid create these two topics references if they cannot be used in the flow
+		// TODO(silvio) avoid create these two topics references eager because they are used conditionally in the flow
 		topicFallbackEtcd: psClient.Topic(topicFallbackEtcd),
 		topicDelete:       psClient.Topic(topicDelete),
 		namespaceIndex:    namespaceIndex,

@@ -149,5 +149,5 @@ type NodeVersion struct {
 	StorageClass  string   `json:"storageClass" datastore:"storageClass"`
 	Uri           string   `json:"uri" datastore:"uri"`
 	Checksum      string   `json:"checksum" datastore:"checksum"`
-	Chunks        []*Chunk `json:"chunks" datastore:"chunks"`
+	Chunks        []*Chunk `json:"chunks,omitempty" datastore:"chunks"`
 }
