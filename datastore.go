@@ -441,7 +441,7 @@ func (s *VeroStore) sendMessageToDeleteTopic(bucket, name string) error {
 }
 
 func (s *VeroStore) createElasticIndexStruct(n *model.Node) *ElasticIndex {
-	return &ElasticIndex{
+	index :=  &ElasticIndex{
 		Index: fmt.Sprintf("%s_node", s.namespaceIndex),
 		ID:    n.ID,
 		Body: ElasticBody{
@@ -449,9 +449,13 @@ func (s *VeroStore) createElasticIndexStruct(n *model.Node) *ElasticIndex {
 			Path:             n.Path,
 			ContentType:      strings.Split(n.ContentType, ";")[0],
 			LastModifiedDate: n.LastModifiedDate,
-			Tags:             n.Metadata.Data["tags"],
+//			Tags:             n.Metadata.Data["tags"],
 		},
 	}
+	if n.Metadata != nil && n.Metadata.Data != nil {
+		index.Body.Tags	= n.Metadata.Data["tags"]
+	}
+	return index
 }
 
 type ElasticBody struct {
