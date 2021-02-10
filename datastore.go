@@ -318,7 +318,7 @@ func (s *VeroStore) AddFileToVero(ctx context.Context, event model.GCSEvent) err
 			_, ok := event.Metadata["DoNotLoadInvoice"]
 			if !ok {
 				g.Go(func() error {
-					return s.sendMessageToInvoiceLoaderTopic(&n)
+					return s.sendMessageToInvoiceLoaderTopic(&nv)
 				})
 			} else {
 				s.log.Warn("file has metadata DoNotLoadInvoice", zap.String("name", event.Name))
@@ -404,8 +404,8 @@ func (s *VeroStore) sendMessageToIndexTopic(n *model.Node) error {
 	}
 }
 
-func (s *VeroStore) sendMessageToInvoiceLoaderTopic(n *model.Node) error {
-	data, err := json.Marshal(n)
+func (s *VeroStore) sendMessageToInvoiceLoaderTopic(nv *model.NodeVersion) error {
+	data, err := json.Marshal(nv)
 	if err != nil {
 		return err
 	}
@@ -417,7 +417,7 @@ func (s *VeroStore) sendMessageToInvoiceLoaderTopic(n *model.Node) error {
 	if err != nil {
 		return err
 	} else {
-		s.log.Info("message published to index", zap.String("name", n.Name), zap.String("messageId", messageID))
+		s.log.Info("message published to index", zap.String("nodeID", nv.NodeID), zap.String("messageId", messageID))
 		return nil
 	}
 }
