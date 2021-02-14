@@ -61,12 +61,12 @@ func (e *VeroEtcdClient) AddNodeVersionToDataFlowAndIncNodeStore(projectID strin
 	}
 	_, err = concurrency.NewSTM(e.client, func(stm concurrency.STM) error {
 		id := path.Join(projectID, "node-version", nv.ID)
-		e.log.Debug("adding key to etcd", zap.String("key", id))
+		e.log.Info("adding key to etcd", zap.String("key", id), zap.Int("contentLength", nv.ContentLength), zap.Int("delta", delta))
 		stm.Put(id, string(bytes))
 		idNs := path.Join(projectID, "node-store", nv.Store)
 		_, err := e.addNodeStoreSTM(stm, idNs, true, nv.Store, nv.ContentLength-delta, 0, 0)
 		return err
-	})
+	}, concurrency.WithIsolation(concurrency.ReadCommitted))
 	return err
 }
 
