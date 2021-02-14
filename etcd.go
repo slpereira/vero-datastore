@@ -9,7 +9,6 @@ import (
 	"github.com/dgryski/trifles/uuid"
 	"github.com/slpereira/vero-datastore/model"
 	"go.uber.org/zap"
-	"google.golang.org/grpc/connectivity"
 	"path"
 	"time"
 )
@@ -24,11 +23,11 @@ var ErrEtcdNotConnected = errors.New("etcd not connected")
 
 func NewVeroEtcdClient(endpoints []string, username, password string, log *zap.Logger) (*VeroEtcdClient, error) {
 	cli, err := clientv3.New(clientv3.Config{
-		Endpoints:   endpoints,       //   []string{"localhost:2379", "localhost:22379", "localhost:32379"},
-		DialTimeout: 5 * time.Second, // TODO parametrize
+		Endpoints:            endpoints,       //   []string{"localhost:2379", "localhost:22379", "localhost:32379"},
+		DialTimeout:          5 * time.Second, // TODO parametrize
 		DialKeepAliveTimeout: 5 * time.Second, // TODO parametrize
-		Username: username,
-		Password: password,
+		Username:             username,
+		Password:             password,
 	})
 	if err != nil {
 		return nil, err
@@ -60,26 +59,14 @@ func (e *VeroEtcdClient) AddNodeVersionToDataFlowAndIncNodeStore(projectID strin
 	if err != nil {
 		return err
 	}
-	var goEtcd bool
-	// check if we are connected to etcd
-	switch e.client.ActiveConnection().GetState() {
-	case connectivity.Idle, connectivity.Ready:
-		goEtcd = true
-	default:
-		goEtcd = false
-	}
-	if goEtcd {
-		_, err = concurrency.NewSTM(e.client, func(stm concurrency.STM) error {
-			id := path.Join(projectID, "node-version", nv.ID)
-			e.log.Debug("adding key to etcd", zap.String("key", id))
-			stm.Put(id, string(bytes))
-			idNs := path.Join(projectID, "node-store", nv.Store)
-			_, err := e.addNodeStoreSTM(stm, idNs, true, nv.Store, nv.ContentLength-delta, 0, 0)
-			return err
-		})
-	} else {
-		return ErrEtcdNotConnected
-	}
+	_, err = concurrency.NewSTM(e.client, func(stm concurrency.STM) error {
+		id := path.Join(projectID, "node-version", nv.ID)
+		e.log.Debug("adding key to etcd", zap.String("key", id))
+		stm.Put(id, string(bytes))
+		idNs := path.Join(projectID, "node-store", nv.Store)
+		_, err := e.addNodeStoreSTM(stm, idNs, true, nv.Store, nv.ContentLength-delta, 0, 0)
+		return err
+	})
 	return err
 }
 
@@ -175,6 +162,7 @@ func (e *VeroEtcdClient) addNodeStoreSTM(stm concurrency.STM, id string, addIfNo
 		return nil, err
 	}
 	stm.Put(id, string(bytes))
+	e.log.Info("incremented node store", zap.String("store", id), zap.Int("contentLength", totalSpace))
 	return ns, nil
 }
 
