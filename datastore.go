@@ -21,28 +21,28 @@ import (
 
 // VeroStore implements the access to the datastore, but include some cache for some objects
 type VeroStore struct {
-	log               *zap.Logger
-	dsClient          *datastore.Client
-	psClient          *pubsub.Client
-	stClient          *storage.Client
-	etcd              *VeroEtcdClient
-	projectID         string
-	cache             *Cache
-	pathExpiration    time.Duration
-	namespaceIndex    string
-	topicIndexing     *pubsub.Topic
-	topicInvoice      *pubsub.Topic
-	topicDelete       *pubsub.Topic
-	doNotAddPath      bool
-	versioning        bool
-	doNotIndex        bool
-	doNotLoadInvoice  bool
+	log              *zap.Logger
+	dsClient         *datastore.Client
+	psClient         *pubsub.Client
+	stClient         *storage.Client
+	projectID        string
+	cache            *Cache
+	pathExpiration   time.Duration
+	namespaceIndex   string
+	topicIndexing    *pubsub.Topic
+	topicInvoice     *pubsub.Topic
+	topicDelete      *pubsub.Topic
+	topicDataflow    *pubsub.Topic
+	doNotAddPath     bool
+	versioning       bool
+	doNotIndex       bool
+	doNotLoadInvoice bool
 }
 
 func NewVeroStore(projectID string, redisAddress []string, redisPwd string,
-	etcdEndpoints []string, etcdUser, etcdPwd string, log *zap.Logger, versioning bool,
-	doNotIndex bool, doNotAddPath bool, doNotLoadInvoice bool,
-	topicIndexing string, topicInvoice string, topicDelete string, namespaceIndex string) (*VeroStore, error) {
+	log *zap.Logger, versioning bool, doNotIndex bool, doNotAddPath bool, doNotLoadInvoice bool,
+	topicIndexing string, topicInvoice string, topicDelete string, topicDataflow string,
+	namespaceIndex string) (*VeroStore, error) {
 	dsClient, err := datastore.NewClient(context.Background(), projectID)
 	if err != nil {
 		return nil, err
@@ -69,21 +69,12 @@ func NewVeroStore(projectID string, redisAddress []string, redisPwd string,
 		pathExpiration = 0
 	}
 
-	etcd, err := NewVeroEtcdClient(etcdEndpoints, etcdUser, etcdPwd, log)
-	if err != nil {
-		dsClient.Close()
-		psClient.Close()
-		stClient.Close()
-		return nil, err
-	}
-
 	return &VeroStore{dsClient: dsClient,
 		psClient:         psClient,
 		stClient:         stClient,
 		projectID:        projectID,
 		cache:            NewCache(redisAddress, redisPwd, true),
 		pathExpiration:   pathExpiration,
-		etcd:             etcd,
 		log:              log,
 		versioning:       versioning,
 		doNotAddPath:     doNotAddPath,
@@ -91,19 +82,21 @@ func NewVeroStore(projectID string, redisAddress []string, redisPwd string,
 		doNotLoadInvoice: doNotLoadInvoice,
 		topicIndexing:    psClient.Topic(topicIndexing),
 		topicInvoice:     psClient.Topic(topicInvoice),
+		topicDataflow:    psClient.Topic(topicDataflow),
 		// TODO(silvio) avoid create this topic reference eager because it is used conditionally in the flow
-		topicDelete:       psClient.Topic(topicDelete),
-		namespaceIndex:    namespaceIndex,
+		topicDelete:    psClient.Topic(topicDelete),
+		namespaceIndex: namespaceIndex,
 	}, nil
 }
 
 func (s *VeroStore) Close() error {
 	s.topicInvoice.Stop()
 	s.topicIndexing.Stop()
+	s.topicDelete.Stop()
+	s.topicDataflow.Stop()
 	s.psClient.Close()
 	s.dsClient.Close()
 	s.stClient.Close()
-	s.etcd.Close()
 	s.cache.Close()
 	return nil
 }
@@ -319,20 +312,20 @@ func (s *VeroStore) AddFileToVero(ctx context.Context, event model.GCSEvent) err
 				s.log.Warn("file has metadata DoNotLoadInvoice", zap.String("name", event.Name))
 			}
 		}
-		if err := g.Wait(); err != nil {
-			return err
-		}
-		s.log.Debug("updating node store and data-flow", zap.String("node-version", nv.ID),
-			zap.String("store", nv.Store), zap.String("name", event.Name))
-		start = time.Now()
-		err = s.etcd.AddNodeVersion(s.projectID, &nv)
-		if err != nil {
-			return err
-		} else {
-			s.log.Info("updated node version", zap.String("node-version", nv.ID),
-				zap.String("store", nv.Store), zap.Duration("time", time.Now().Sub(start)), zap.String("name", event.Name))
-		}
-		return nil
+		g.Go(func() error {
+			s.log.Debug("updating dataflow", zap.String("node-version", nv.ID),
+				zap.String("name", event.Name))
+			start = time.Now()
+			err = s.sendMessageToDataflowTopic(&nv)
+			if err != nil {
+				return err
+			} else {
+				s.log.Info("dataflow updated", zap.String("node-version", nv.ID),
+					zap.String("store", nv.Store), zap.Duration("time", time.Now().Sub(start)), zap.String("name", event.Name))
+				return nil
+			}
+		})
+		return g.Wait()
 	})
 	if err != nil {
 		s.log.Error("processed file with error", zap.String("name", event.Name),
@@ -392,6 +385,24 @@ func (s *VeroStore) sendMessageToInvoiceLoaderTopic(nv *model.NodeVersion) error
 	}
 }
 
+func (s *VeroStore) sendMessageToDataflowTopic(nv *model.NodeVersion) error {
+	data, err := json.Marshal(nv)
+	if err != nil {
+		return err
+	}
+	m := &pubsub.Message{
+		Data: data,
+	}
+	r := s.topicDataflow.Publish(context.Background(), m)
+	messageID, err := r.Get(context.Background())
+	if err != nil {
+		return err
+	} else {
+		s.log.Info("message published to dataflow", zap.String("nodeID", nv.NodeID), zap.String("messageId", messageID))
+		return nil
+	}
+}
+
 func (s *VeroStore) sendMessageToDeleteTopic(bucket, name string) error {
 	uri, err := url.Parse(fmt.Sprintf("gs://%s/%s", bucket, name))
 	if err != nil {
@@ -411,7 +422,7 @@ func (s *VeroStore) sendMessageToDeleteTopic(bucket, name string) error {
 }
 
 func (s *VeroStore) createElasticIndexStruct(n *model.Node) *ElasticIndex {
-	index :=  &ElasticIndex{
+	index := &ElasticIndex{
 		Index: fmt.Sprintf("%s_node", s.namespaceIndex),
 		ID:    n.ID,
 		Body: ElasticBody{
@@ -419,11 +430,11 @@ func (s *VeroStore) createElasticIndexStruct(n *model.Node) *ElasticIndex {
 			Path:             n.Path,
 			ContentType:      strings.Split(n.ContentType, ";")[0],
 			LastModifiedDate: n.LastModifiedDate,
-//			Tags:             n.Metadata.Data["tags"],
+			//			Tags:             n.Metadata.Data["tags"],
 		},
 	}
 	if n.Metadata != nil && n.Metadata.Data != nil {
-		index.Body.Tags	= n.Metadata.Data["tags"]
+		index.Body.Tags = n.Metadata.Data["tags"]
 	}
 	return index
 }
