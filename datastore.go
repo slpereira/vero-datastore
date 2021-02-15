@@ -32,7 +32,6 @@ type VeroStore struct {
 	namespaceIndex    string
 	topicIndexing     *pubsub.Topic
 	topicInvoice      *pubsub.Topic
-	topicFallbackEtcd *pubsub.Topic
 	topicDelete       *pubsub.Topic
 	doNotAddPath      bool
 	versioning        bool
@@ -43,8 +42,7 @@ type VeroStore struct {
 func NewVeroStore(projectID string, redisAddress []string, redisPwd string,
 	etcdEndpoints []string, etcdUser, etcdPwd string, log *zap.Logger, versioning bool,
 	doNotIndex bool, doNotAddPath bool, doNotLoadInvoice bool,
-	topicIndexing string, topicInvoice string, topicFallbackEtcd string,
-	topicDelete string, namespaceIndex string) (*VeroStore, error) {
+	topicIndexing string, topicInvoice string, topicDelete string, namespaceIndex string) (*VeroStore, error) {
 	dsClient, err := datastore.NewClient(context.Background(), projectID)
 	if err != nil {
 		return nil, err
@@ -93,15 +91,13 @@ func NewVeroStore(projectID string, redisAddress []string, redisPwd string,
 		doNotLoadInvoice: doNotLoadInvoice,
 		topicIndexing:    psClient.Topic(topicIndexing),
 		topicInvoice:     psClient.Topic(topicInvoice),
-		// TODO(silvio) avoid create these two topics references eager because they are used conditionally in the flow
-		topicFallbackEtcd: psClient.Topic(topicFallbackEtcd),
+		// TODO(silvio) avoid create this topic reference eager because it is used conditionally in the flow
 		topicDelete:       psClient.Topic(topicDelete),
 		namespaceIndex:    namespaceIndex,
 	}, nil
 }
 
 func (s *VeroStore) Close() error {
-	s.topicFallbackEtcd.Stop()
 	s.topicInvoice.Stop()
 	s.topicIndexing.Stop()
 	s.psClient.Close()
@@ -198,7 +194,6 @@ func (s *VeroStore) AddFileToVero(ctx context.Context, event model.GCSEvent) err
 		if err != nil && err != datastore.ErrNoSuchEntity {
 			return err
 		}
-		delta := 0
 		// New Node
 		if err == datastore.ErrNoSuchEntity {
 			n.Name = filepath.Base(nodeID)
@@ -330,15 +325,11 @@ func (s *VeroStore) AddFileToVero(ctx context.Context, event model.GCSEvent) err
 		s.log.Debug("updating node store and data-flow", zap.String("node-version", nv.ID),
 			zap.String("store", nv.Store), zap.String("name", event.Name))
 		start = time.Now()
-		err = s.etcd.AddNodeVersionToDataFlowAndIncNodeStore(s.projectID, &nv, delta)
+		err = s.etcd.AddNodeVersion(s.projectID, &nv)
 		if err != nil {
-			s.log.Warn("etcd not available, fallback to pubsub", zap.Duration("time", time.Now().Sub(start)), zap.String("name", event.Name), zap.Error(err))
-			err = s.sendMessageToFallbackEtcdTopic(&nv, delta)
-			if err != nil {
-				return err
-			}
+			return err
 		} else {
-			s.log.Info("updated node store and data-flow", zap.String("node-version", nv.ID),
+			s.log.Info("updated node version", zap.String("node-version", nv.ID),
 				zap.String("store", nv.Store), zap.Duration("time", time.Now().Sub(start)), zap.String("name", event.Name))
 		}
 		return nil
@@ -362,27 +353,6 @@ func (s *VeroStore) addHoldToFile(bucket, name string) error {
 	}
 	_, err := o.Update(context.Background(), objectAttrsToUpdate)
 	return err
-}
-
-func (s *VeroStore) sendMessageToFallbackEtcdTopic(nv *model.NodeVersion, delta int) error {
-	attrs := make(map[string]string)
-	attrs["delta"] = strconv.Itoa(delta)
-	data, err := json.Marshal(nv)
-	if err != nil {
-		return err
-	}
-	m := &pubsub.Message{
-		Data:       data,
-		Attributes: attrs,
-	}
-	r := s.topicFallbackEtcd.Publish(context.Background(), m)
-	messageID, err := r.Get(context.Background())
-	if err != nil {
-		return err
-	} else {
-		s.log.Info("message published to fallback topic", zap.String("name", nv.NodeID), zap.String("messageId", messageID))
-		return nil
-	}
 }
 
 func (s *VeroStore) sendMessageToIndexTopic(n *model.Node) error {
