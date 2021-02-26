@@ -475,16 +475,23 @@ type ElasticIndex struct {
 //        body,
 //    });
 
+func (s *VeroStore) getKeyCache(key *datastore.Key) string {
+	return s.projectID+"/path/"+key.Name
+}
+
 func (s *VeroStore) addPathToCache(key *datastore.Key) {
-	_ = s.cache.Put(s.projectID+"/path/"+key.Name, time.Now().Format(time.RFC3339), s.pathExpiration)
+	s.log.Info("adding path to cache", zap.String("path", key.Name))
+	_ = s.cache.Put(s.getKeyCache(key), time.Now().Format(time.RFC3339), s.pathExpiration)
 }
 
 func (s *VeroStore) checkPath(key *datastore.Key, tx *datastore.Transaction) (bool, error) {
-	exists, err := s.cache.Exists(key.Name)
+	exists, err := s.cache.Exists(s.getKeyCache(key))
 	if err != nil {
 		return false, err
 	}
 	if exists {
+		// TODO Change to debug in the future
+		s.log.Info("path from cache", zap.String("path", key.Name))
 		return true, nil
 	}
 	// the last step is to check in the datastore itself
@@ -513,11 +520,6 @@ func (s *VeroStore) addPathInternally(path string, tx *datastore.Transaction) er
 		})
 		return err
 	}
-}
-
-type nodeKey struct {
-	n *model.Node
-	k *datastore.Key
 }
 
 func (s *VeroStore) addIfPathNotExists(path string, tx *datastore.Transaction) error {
