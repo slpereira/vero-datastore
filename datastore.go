@@ -13,6 +13,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -26,7 +27,7 @@ type VeroStore struct {
 	psClient         *pubsub.Client
 	stClient         *storage.Client
 	projectID        string
-	cache            *Cache
+	cache            MemCache
 	pathExpiration   time.Duration
 	namespaceIndex   string
 	topicIndexing    *pubsub.Topic
@@ -39,7 +40,7 @@ type VeroStore struct {
 	doNotLoadInvoice bool
 }
 
-func NewVeroStore(projectID string, redisAddress []string, redisPwd string,
+func NewVeroStore(projectID string, redisAddress []string, redisPwd string, redisClustered bool,
 	log *zap.Logger, versioning bool, doNotIndex bool, doNotAddPath bool, doNotLoadInvoice bool,
 	topicIndexing string, topicInvoice string, topicDelete string, topicDataflow string,
 	namespaceIndex string) (*VeroStore, error) {
@@ -73,7 +74,7 @@ func NewVeroStore(projectID string, redisAddress []string, redisPwd string,
 		psClient:         psClient,
 		stClient:         stClient,
 		projectID:        projectID,
-		cache:            NewCache(redisAddress, redisPwd, true),
+		cache:            NewMemCache(redisAddress, redisPwd, true, log, redisClustered),
 		pathExpiration:   pathExpiration,
 		log:              log,
 		versioning:       versioning,
@@ -476,7 +477,7 @@ type ElasticIndex struct {
 //    });
 
 func (s *VeroStore) getKeyCache(key *datastore.Key) string {
-	return s.projectID+"/path/"+key.Name
+	return path.Join(s.projectID, "path", key.Name)
 }
 
 func (s *VeroStore) addPathToCache(key *datastore.Key) {
