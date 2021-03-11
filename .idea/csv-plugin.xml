@@ -45,6 +45,13 @@
             </Attribute>
           </value>
         </entry>
+        <entry key="/datastore.go">
+          <value>
+            <Attribute>
+              <option name="separator" value="&#9;" />
+            </Attribute>
+          </value>
+        </entry>
         <entry key="/model/types.go">
           <value>
             <Attribute>

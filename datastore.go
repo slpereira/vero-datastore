@@ -287,9 +287,10 @@ func (s *VeroStore) AddFileToVero(ctx context.Context, event model.GCSEvent) err
 
 		doNotLoadInvoice := s.doNotLoadInvoice
 		if !doNotLoadInvoice {
-			_, doNotLoadInvoice = event.Metadata["DoNotLoadInvoice"]
+			// the metadata must be lower case because gsutil do not allow capitalized metadatas
+			_, doNotLoadInvoice = event.Metadata["donotloadinvoice"]
 			if doNotLoadInvoice {
-				s.log.Warn("file has metadata DoNotLoadInvoice", zap.String("name", event.Name))
+				s.log.Warn("file has metadata donotloadinvoice", zap.String("name", event.Name))
 			}
 		}
 		// add the holds to the file
@@ -299,16 +300,18 @@ func (s *VeroStore) AddFileToVero(ctx context.Context, event model.GCSEvent) err
 		g := new(errgroup.Group)
 		// must index the metadata in the elastic
 		if !s.doNotIndex {
+			// the metadata must be lower case because gsutil do not allow capitalized metadatas
 			// check if there is some metadata telling the process to not index
-			_, ok := event.Metadata["DoNotIndex"]
+			_, ok := event.Metadata["donotindex"]
 			if !ok {
 				g.Go(func() error {
 					return s.sendMessageToIndexTopic(&n)
 				})
 			} else {
-				s.log.Warn("file has metadata DoNotIndex", zap.String("name", event.Name))
+				s.log.Warn("file has metadata donotindex", zap.String("name", event.Name))
 			}
 		}
+		// Add
 		if !doNotLoadInvoice {
 			g.Go(func() error {
 				return s.sendMessageToInvoiceLoaderTopic(&nv)
@@ -382,7 +385,7 @@ func (s *VeroStore) sendMessageToInvoiceLoaderTopic(nv *model.NodeVersion) error
 	if err != nil {
 		return err
 	} else {
-		s.log.Info("message published to index", zap.String("nodeID", nv.NodeID), zap.String("messageId", messageID))
+		s.log.Info("message published to invoice loader", zap.String("nodeID", nv.NodeID), zap.String("messageId", messageID))
 		return nil
 	}
 }
