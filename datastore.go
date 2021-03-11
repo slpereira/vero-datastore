@@ -285,8 +285,15 @@ func (s *VeroStore) AddFileToVero(ctx context.Context, event model.GCSEvent) err
 		// * send message to topics for indexing and invoice loader
 		// * add data to etcd
 
+		doNotLoadInvoice := s.doNotLoadInvoice
+		if !doNotLoadInvoice {
+			_, doNotLoadInvoice = event.Metadata["DoNotLoadInvoice"]
+			if doNotLoadInvoice {
+				s.log.Warn("file has metadata DoNotLoadInvoice", zap.String("name", event.Name))
+			}
+		}
 		// add the holds to the file
-		if err := s.addHoldToFile(event.Bucket, event.Name); err != nil {
+		if err := s.addHoldToFile(event.Bucket, event.Name, doNotLoadInvoice); err != nil {
 			return err
 		}
 		g := new(errgroup.Group)
@@ -302,16 +309,10 @@ func (s *VeroStore) AddFileToVero(ctx context.Context, event model.GCSEvent) err
 				s.log.Warn("file has metadata DoNotIndex", zap.String("name", event.Name))
 			}
 		}
-		// send message to invoice topic if appropriated
-		if !s.doNotLoadInvoice {
-			_, ok := event.Metadata["DoNotLoadInvoice"]
-			if !ok {
-				g.Go(func() error {
-					return s.sendMessageToInvoiceLoaderTopic(&nv)
-				})
-			} else {
-				s.log.Warn("file has metadata DoNotLoadInvoice", zap.String("name", event.Name))
-			}
+		if !doNotLoadInvoice {
+			g.Go(func() error {
+				return s.sendMessageToInvoiceLoaderTopic(&nv)
+			})
 		}
 		g.Go(func() error {
 			s.log.Debug("updating dataflow", zap.String("node-version", nv.ID),
@@ -339,11 +340,11 @@ func (s *VeroStore) AddFileToVero(ctx context.Context, event model.GCSEvent) err
 	return err
 }
 
-func (s *VeroStore) addHoldToFile(bucket, name string) error {
+func (s *VeroStore) addHoldToFile(bucket, name string, doNotLoadInvoice bool) error {
 	o := s.stClient.Bucket(bucket).Object(name)
 	objectAttrsToUpdate := storage.ObjectAttrsToUpdate{
-		EventBasedHold: s.versioning,
-		TemporaryHold:  true,
+		EventBasedHold: !doNotLoadInvoice, // InvoiceLoader remove this hold
+		TemporaryHold:  true,              // compression remove this hold
 	}
 	_, err := o.Update(context.Background(), objectAttrsToUpdate)
 	return err
